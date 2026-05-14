@@ -9,12 +9,13 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 
 load_dotenv()
 
-# ====================== SIMULATION CONFIG ======================
+# ====================== CONFIG ======================
 DATA_FILE = "simulation.json"
+
 WHALES = [
-    "0xa5ea13a81d2b7e8e424b182bdc1db08e756bd96a",
-    "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",
-    "0x9f2fe025f84839ca81dd8e0338892605702d2ca8",
+    "0xa5ea13a81d2b7e8e424b182bdc1db08e756bd96a",  # bossoskil1
+    "0x2005d16a84ceefa912d4e380cd32e7ff827875ea",  # RN1
+    "0x9f2fe025f84839ca81dd8e0338892605702d2ca8",  # surfandturf
     "0x492442eab586f242b53bda933fd5de859c8a3782",
     "0x6a72f61820b26b1fe4d956e17b6dc2a1ea3033ee",
     "0x204f72f35326db932158cba6adff0b9a1da95e14",
@@ -23,9 +24,12 @@ WHALES = [
     "0x02227b8f5a9636e895607edd3185ed6ee5598ff7",
     "0xefbc5fec8d7b0acdc8911bdd9a98d6964308f9a2"
 ]
-MIN_SIZE = 20
 
-# Load simulation data
+MIN_SIZE = 20
+COPY_PERCENT = 0.05
+MAX_PER_TRADE = 100
+
+# Load or create simulation
 if os.path.exists(DATA_FILE):
     with open(DATA_FILE, "r") as f:
         data = json.load(f)
@@ -44,8 +48,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("▶️ Start", callback_data="start"),
          InlineKeyboardButton("⏹️ Stop", callback_data="stop")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🦈 Whale Copier Bot\nFake $500 Account • 5% Sizing", reply_markup=reply_markup)
+    await update.message.reply_text(
+        "🦈 **Whale Copier Bot**\n"
+        "Fake $500 account • 5% sizing\n"
+        "Tap a button below:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -53,24 +61,28 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global running
 
     if query.data == "status":
-        copy_size = min(data["balance"] * 0.05, 100)
+        copy_size = min(data["balance"] * COPY_PERCENT, MAX_PER_TRADE)
         await query.edit_message_text(
-            f"📊 **Simulated Balance**\n"
+            f"📊 **Simulated Account**\n"
             f"Balance: **${data['balance']:.2f}**\n"
             f"Copy Size: **${copy_size:.2f}**\n"
-            f"Status: {'🟢 RUNNING' if running else '⭕ STOPPED'}"
+            f"Status: {'🟢 RUNNING' if running else '⭕ STOPPED'}\n"
+            f"Watching 10 whales"
         )
     elif query.data == "history":
-        msg = "📜 Last trades:\n\n"
-        for t in data["trades"][-5:]:
-            msg += f"{t['timestamp']} | {t['market']} | ${t['amount']:.2f} | {t['result']} (${t['pnl']:.2f})\n"
-        await query.edit_message_text(msg if data["trades"] else "No trades yet.")
+        if data["trades"]:
+            msg = "📜 Last 5 trades:\n\n"
+            for t in data["trades"][-5:]:
+                msg += f"{t['timestamp']} | {t['market']} | ${t['amount']:.2f} | {t['result']} (${t['pnl']:.2f})\n"
+            await query.edit_message_text(msg)
+        else:
+            await query.edit_message_text("No trades yet.")
     elif query.data == "start":
         running = True
-        await query.edit_message_text("🚀 Simulation Started")
+        await query.edit_message_text("🚀 Bot Started")
     elif query.data == "stop":
         running = False
-        await query.edit_message_text("⏹️ Simulation Stopped")
+        await query.edit_message_text("⏹️ Bot Stopped")
 
 def polling_loop():
     global running
@@ -86,16 +98,14 @@ def polling_loop():
                     tid = trade.get("id") or trade.get("tx_hash")
                     if tid in seen: continue
                     if trade.get("side") == "BUY" and float(trade.get("size", 0)) >= MIN_SIZE:
-                        amt = min(data["balance"] * 0.05, 100)
-                        market = trade.get("market_slug", "unknown")
-                        
+                        amt = min(data["balance"] * COPY_PERCENT, MAX_PER_TRADE)
                         is_win = random.random() < 0.60
                         pnl = round(amt * (0.25 if is_win else -0.75), 2)
                         data["balance"] = round(data["balance"] + pnl, 2)
                         
                         data["trades"].append({
                             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                            "market": market,
+                            "market": trade.get("market_slug", "unknown"),
                             "amount": amt,
                             "result": "WIN" if is_win else "LOSS",
                             "pnl": pnl
@@ -103,7 +113,7 @@ def polling_loop():
                         with open(DATA_FILE, "w") as f:
                             json.dump(data, f)
                         
-                        msg = f"🟢 SIMULATED COPY\nMarket: {market}\nAmount: ${amt:.2f}\nResult: { 'WIN' if is_win else 'LOSS'} (${pnl})\nBalance: ${data['balance']:.2f}"
+                        msg = f"🟢 SIMULATED COPY!\nMarket: {trade.get('market_slug', 'unknown')}\nAmount: ${amt:.2f}\nResult: {'WIN' if is_win else 'LOSS'} (${pnl})\nNew Balance: ${data['balance']:.2f}"
                         requests.get(f"https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}&text={msg}")
                         seen.add(tid)
             time.sleep(12)
@@ -111,7 +121,7 @@ def polling_loop():
             time.sleep(10)
 
 if __name__ == "__main__":
-    print("🚀 Starting Telegram Whale Bot...")
+    print("🚀 Starting Telegram Whale Copier Bot...")
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button))
